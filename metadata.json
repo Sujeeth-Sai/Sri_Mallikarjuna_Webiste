@@ -1,0 +1,8 @@
+{
+  "name": "Sri Mallikarjuna Industries",
+  "description": "A polished inventory management suite and business ledger with multi-card analytics, Telugu/English support, and an AI CFO.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
