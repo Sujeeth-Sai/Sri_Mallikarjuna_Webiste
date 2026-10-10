@@ -1,10 +1,9 @@
-import { createClient, type SupabaseClient } from '@supabase/supabase-js'
+import type { SupabaseClient } from '@supabase/supabase-js'
 import type { AppData, Attendance, Expense, Product, Staff, StockMovement, SupplierCustomer } from '../types'
 import { emptyData } from '../data/seed'
+import { isCloudConfigured, supabase } from './supabase'
 
 const LOCAL_KEY = 'smi-erp-data-v3'
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL?.trim()
-const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY?.trim()
 
 export interface DataProvider {
   load(): Promise<AppData>
@@ -69,8 +68,8 @@ class SupabaseProvider implements DataProvider {
   private cache = new LocalStorageProvider()
   private previous: AppData | null = null
 
-  constructor(url: string, key: string) {
-    this.client = createClient(url, key, { auth: { persistSession: true, autoRefreshToken: true } })
+  constructor(client: SupabaseClient) {
+    this.client = client
   }
 
   async load(): Promise<AppData> {
@@ -160,5 +159,4 @@ class SupabaseProvider implements DataProvider {
   }
 }
 
-export const isCloudConfigured = Boolean(supabaseUrl && supabaseKey)
-export const dataProvider: DataProvider = isCloudConfigured ? new SupabaseProvider(supabaseUrl!, supabaseKey!) : new LocalStorageProvider()
+export const dataProvider: DataProvider = isCloudConfigured ? new SupabaseProvider(supabase!) : new LocalStorageProvider()

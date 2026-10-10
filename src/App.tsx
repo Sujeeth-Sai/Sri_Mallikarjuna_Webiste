@@ -3,12 +3,13 @@ import { AnimatePresence, motion } from 'motion/react'
 import {
   ArrowDownLeft, ArrowRight, ArrowUpRight, BadgeIndianRupee, Bot, Boxes, Building2,
   CalendarCheck, Check, ChevronLeft, ChevronRight, CircleGauge, ClipboardCheck,
-  Download, Factory, FileText, Globe2, IndianRupee, Menu, PackageCheck, PanelLeftClose,
+  Download, Factory, FileText, Globe2, IndianRupee, LogOut, Menu, PackageCheck, PanelLeftClose,
   PanelLeftOpen, Plus, ReceiptIndianRupee, Search, Send, Sparkles, TrendingDown,
   TrendingUp, Truck, UserRoundPlus, Users, WalletCards, X, Zap,
 } from 'lucide-react'
 import type { AppData, Expense, Language, Product, Staff, SupplierCustomer, View } from './types'
 import { dataProvider } from './lib/storage'
+import { useAuth } from './lib/auth'
 import { useCopy } from './translations'
 import { Empty, Modal, PageIntro, StatusPill } from './components/ui'
 
@@ -24,6 +25,7 @@ const categoryTe: Record<Expense['category'], string> = { Labour: 'కార్�
 type ModalKind = null | 'in' | 'out' | 'expense' | 'party' | 'product' | 'worker'
 
 export default function App() {
+  const { user, signOut } = useAuth()
   const [language, setLanguage] = useState<Language>('en')
   const [view, setView] = useState<View>('dashboard')
   const [data, setData] = useState<AppData | null>(null)
@@ -87,7 +89,7 @@ export default function App() {
     <div className={`min-h-screen transition-[margin] duration-300 ${collapsed ? 'lg:ml-[84px]' : 'lg:ml-[260px]'}`}>
       <header className="sticky top-0 z-30 flex h-[72px] items-center justify-between border-b border-black/[0.06] bg-[#f5f0e7]/90 px-4 backdrop-blur-xl sm:px-6 lg:px-8">
         <div className="flex items-center gap-3"><button className="icon-btn lg:hidden" onClick={() => setMobileNav(true)} aria-label={t.menu}><Menu size={19} /></button><div><p className="text-[11px] font-bold uppercase tracking-[.16em] text-brass">{t.overview}</p><p className="hidden text-xs text-slate-500 sm:block">{t.appTagline}</p></div></div>
-        <div className="flex items-center gap-2 sm:gap-3"><button onClick={() => setLanguage(l => l === 'en' ? 'te' : 'en')} className="btn-secondary !px-3" aria-label="Switch language"><Globe2 size={16} /><span>{t.language}</span></button><button onClick={() => setModal('in')} disabled={!data.products.length} className="btn-primary hidden sm:inline-flex"><Plus size={16} />{t.receive}</button><div className="hidden h-9 w-px bg-black/10 md:block" /><div className="hidden items-center gap-2 md:flex"><div className="flex h-9 w-9 items-center justify-center rounded-full bg-pine text-xs font-bold text-white">SM</div><div className="leading-tight"><p className="text-xs font-bold">Mallikarjuna</p><p className="text-[10px] text-slate-500">Owner</p></div></div></div>
+        <div className="flex items-center gap-2 sm:gap-3"><button onClick={() => setLanguage(l => l === 'en' ? 'te' : 'en')} className="btn-secondary !px-3" aria-label="Switch language"><Globe2 size={16} /><span>{t.language}</span></button><button onClick={() => setModal('in')} disabled={!data.products.length} className="btn-primary hidden sm:inline-flex"><Plus size={16} />{t.receive}</button><div className="hidden h-9 w-px bg-black/10 md:block" /><div className="hidden items-center gap-2 md:flex"><div className="flex h-9 w-9 items-center justify-center rounded-full bg-pine text-xs font-bold text-white">{(user?.email || 'SM').slice(0, 2).toUpperCase()}</div><div className="max-w-36 leading-tight"><p className="truncate text-xs font-bold">{user?.email || 'Owner'}</p><p className="text-[10px] text-slate-500">Owner</p></div></div><button onClick={() => void signOut()} className="icon-btn" title="Sign out" aria-label="Sign out"><LogOut size={17}/></button></div>
       </header>
       <main className="mx-auto max-w-[1600px] p-4 sm:p-6 lg:p-8"><AnimatePresence mode="wait"><motion.div key={`${view}-${language}`} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }} transition={{ duration: .22 }}>{page}</motion.div></AnimatePresence></main>
     </div>

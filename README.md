@@ -33,3 +33,7 @@ The generated APK is written to `android/app/build/outputs/apk/debug/app-debug.a
 ## Data architecture
 
 Supabase is the primary data provider. The app synchronizes products, contacts, stock transactions, expenses, employees, and attendance with the existing shared schema. A local browser cache keeps the interface usable when the network is unavailable.
+
+## Authentication
+
+The application uses Supabase email/password authentication and starts on a protected sign-in screen. Create the owner account in **Supabase Dashboard → Authentication → Users**, then run `supabase/auth-rls.sql` in the Supabase SQL Editor to restrict the business tables to signed-in users.
