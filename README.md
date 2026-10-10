@@ -1,62 +1,35 @@
-# Sri Mallikarjuna — Operations Web App
+# Sri Mallikarjuna Industries
 
-A web workspace for stock, contacts, expenses, staff attendance, and business reporting. The React interface connects to Supabase for account and data access, with an Express endpoint for AI-assisted reports.
+Bilingual enterprise management suite for cashew processing and agro-trading. The same React application powers the Vercel website and the Capacitor Android app.
 
-[Android companion](https://github.com/Sujeeth-Sai/Sri_Mallikarjuna_App) · [Application](src/App.tsx) · [Data layer](src/firebase.ts)
-
-## Main workflows
-
-- Review stock and inventory movements.
-- Manage supplier and customer records.
-- Track expenses and staff attendance.
-- Explore dashboard charts and AI-assisted CFO reports.
-- Use translated interface text from `src/translations.ts`.
-
-## Stack
-
-React, TypeScript, Vite, Express, Supabase, Recharts, and jsPDF. The optional report endpoint uses the Google Gen AI SDK. Despite its filename, `src/firebase.ts` implements the application's **Supabase** data layer.
-
-## Local setup
+## Local development
 
 ```bash
-git clone https://github.com/Sujeeth-Sai/Sri_Mallikarjuna_Webiste.git
-cd Sri_Mallikarjuna_Webiste
-npm ci
-cp .env.example .env
-```
-
-Configure your own `SUPABASE_URL` and `SUPABASE_ANON_KEY` in `.env`. Set `GEMINI_API_KEY` only if you want to use the server-side AI report endpoint. The Vite config reads the Supabase values at build time.
-
-```bash
+cp .env.example .env.local
+npm install
 npm run dev
 ```
 
-Open [localhost:3000](http://localhost:3000).
+Set `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` to connect both builds to the shared Supabase project. `VITE_GEMINI_API_KEY` is optional and enables the online AI CFO response; the app includes an offline analysis fallback.
 
-## Checks and production build
+## Web build
 
 ```bash
-npm run lint
 npm run build
-NODE_ENV=production npm start
+npm run preview
 ```
 
-`lint` runs TypeScript checking. The build creates the browser bundle and `dist/server.cjs`; an Express runtime is needed for the report API.
+## Android build
 
-## Repository map
+```bash
+npm run build
+npx cap sync android
+cd android
+./gradlew assembleDebug
+```
 
-| Path | Purpose |
-| --- | --- |
-| `src/App.tsx` | Authentication, data subscriptions, and main workspace |
-| `src/components/` | Dashboard, stock, contacts, expenses, attendance, and reports |
-| `src/firebase.ts` | Supabase data access and subscriptions |
-| `src/types.ts` | Business record types |
-| `server.ts` | Express server and AI report endpoint |
+The generated APK is written to `android/app/build/outputs/apk/debug/app-debug.apk`.
 
-## Integration status
+## Data architecture
 
-This checkout does not include database migrations. Reproducing the backend requires the matching Supabase schema and RLS policies. Configure a separate development project: the data layer contains a fallback project configuration.
-
-The Android and web repositories use some different table names, including `stock_transactions` versus `movements` and `employees` versus `staff`. Review the schema mapping before assuming the two clients synchronize the same records. End-to-end cross-platform sync is not established by this README.
-
-Use synthetic records when demonstrating the project. AI-generated reports need human review.
+Supabase is the primary data provider. The app synchronizes products, contacts, stock transactions, expenses, employees, and attendance with the existing shared schema. A local browser cache keeps the interface usable when the network is unavailable.

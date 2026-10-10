@@ -1,895 +1,208 @@
-import React, { useState, useEffect } from 'react';
-import { motion, AnimatePresence } from 'motion/react';
+import { useEffect, useMemo, useState } from 'react'
+import { AnimatePresence, motion } from 'motion/react'
 import {
-  LayoutDashboard,
-  Box,
-  Users,
-  CalendarDays,
-  FileText,
-  BrainCircuit,
-  Menu,
-  ChevronLeft,
-  ChevronRight,
-  User,
-  Globe,
-  Plus,
-  Compass,
-  CornerDownRight,
-  Database,
-  AlertTriangle,
-  Check,
-  Copy,
-  ExternalLink,
-  Lock,
-  Mail,
-  LogOut
-} from 'lucide-react';
+  ArrowDownLeft, ArrowRight, ArrowUpRight, BadgeIndianRupee, Bot, Boxes, Building2,
+  CalendarCheck, Check, ChevronLeft, ChevronRight, CircleGauge, ClipboardCheck,
+  Download, Factory, FileText, Globe2, IndianRupee, Menu, PackageCheck, PanelLeftClose,
+  PanelLeftOpen, Plus, ReceiptIndianRupee, Search, Send, Sparkles, TrendingDown,
+  TrendingUp, Truck, UserRoundPlus, Users, WalletCards, X, Zap,
+} from 'lucide-react'
+import type { AppData, Expense, Language, Product, Staff, SupplierCustomer, View } from './types'
+import { dataProvider } from './lib/storage'
+import { useCopy } from './translations'
+import { Empty, Modal, PageIntro, StatusPill } from './components/ui'
 
-// Types and Translations
-import {
-  Product,
-  StockMovement,
-  SupplierCustomer,
-  Staff,
-  Attendance,
-  Expense,
-  ActivityLog,
-  ViewType,
-  LanguageType
-} from './types';
-import { translations } from './translations';
+const money = (value: number, compact = false) => new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0, notation: compact ? 'compact' : 'standard' }).format(value)
+const number = (value: number, max = 0) => new Intl.NumberFormat('en-IN', { maximumFractionDigits: max }).format(value)
+const today = () => new Date().toISOString().slice(0, 10)
+const uid = (_prefix: string) => crypto.randomUUID()
+const categories: Expense['category'][] = ['Labour', 'Electricity & Power', 'Packaging Material', 'Freight & Transport', 'Machinery Maintenance', 'General & Admin']
 
-// Database Manager
-import {
-  supabase,
-  onSnapshot,
-  setDoc,
-  deleteDoc,
-  writeBatch,
-  logActivity,
-  getCollectionData,
-  schemaStatus,
-  generateUUID
-} from './firebase';
+const roleTe: Record<Staff['role'], string> = { Shelling: 'షెల్లింగ్', Peeling: 'పీలింగ్', Grading: 'గ్రేడింగ్', Packing: 'ప్యాకింగ్', 'Machine Operator': 'మెషిన్ ఆపరేటర్', Supervisor: 'సూపర్‌వైజర్' }
+const categoryTe: Record<Expense['category'], string> = { Labour: 'కార్మికులు', 'Electricity & Power': 'విద్యుత్ & పవర్', 'Packaging Material': 'ప్యాకేజింగ్ సామగ్రి', 'Freight & Transport': 'రవాణా', 'Machinery Maintenance': 'యంత్రాల నిర్వహణ', 'General & Admin': 'సాధారణ & పరిపాలన' }
 
-// Views
-import DashboardView from './components/DashboardView';
-import StockInventoryView from './components/StockInventoryView';
-import SuppliersCustomersView from './components/SuppliersCustomersView';
-import StaffAttendanceView from './components/StaffAttendanceView';
-import ExpensesLedgerView from './components/ExpensesLedgerView';
-import AiCfoReportsView from './components/AiCfoReportsView';
+type ModalKind = null | 'in' | 'out' | 'expense' | 'party'
 
 export default function App() {
-  // Navigation & Language States
-  const [activeView, setActiveView] = useState<ViewType>('Dashboard');
-  const [lang, setLang] = useState<LanguageType>('English');
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [isMobileOpen, setIsMobileOpen] = useState(false);
+  const [language, setLanguage] = useState<Language>('en')
+  const [view, setView] = useState<View>('dashboard')
+  const [data, setData] = useState<AppData | null>(null)
+  const [collapsed, setCollapsed] = useState(false)
+  const [mobileNav, setMobileNav] = useState(false)
+  const [modal, setModal] = useState<ModalKind>(null)
+  const [toast, setToast] = useState('')
+  const t = useCopy(language)
 
-  // Auth States
-  const [user, setUser] = useState<any>(null);
-  const [authLoading, setAuthLoading] = useState(true);
-  const [authEmail, setAuthEmail] = useState('');
-  const [authPassword, setAuthPassword] = useState('');
-  const [isSignUp, setIsSignUp] = useState(false);
-  const [authError, setAuthError] = useState<string | null>(null);
-  const [authSubmitting, setAuthSubmitting] = useState(false);
+  useEffect(() => { dataProvider.load().then(setData) }, [])
+  useEffect(() => { if (data) dataProvider.save(data) }, [data])
+  useEffect(() => { if (!toast) return; const id = setTimeout(() => setToast(''), 2600); return () => clearTimeout(id) }, [toast])
 
-  // Supabase Table Status
-  const [isTablesMissing, setIsTablesMissing] = useState(false);
-  const [showSchemaModal, setShowSchemaModal] = useState(false);
-  const [copied, setCopied] = useState(false);
+  const showToast = (message: string) => setToast(message)
+  const navigate = (next: View) => { setView(next); setMobileNav(false); window.scrollTo({ top: 0, behavior: 'smooth' }) }
 
-  // Check & listen to Supabase Auth state
-  useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setUser(session?.user ?? null);
-      setAuthLoading(false);
-    });
+  if (!data) return <div className="flex min-h-screen items-center justify-center bg-parchment"><div className="flex items-center gap-3 text-sm font-semibold text-pine"><Factory className="animate-pulse" /> Loading Sri Mallikarjuna Industries…</div></div>
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ?? null);
-      setAuthLoading(false);
-    });
+  const nav = [
+    { id: 'dashboard' as View, label: t.dashboard, icon: CircleGauge },
+    { id: 'inventory' as View, label: t.inventory, icon: Boxes },
+    { id: 'parties' as View, label: t.parties, icon: Building2 },
+    { id: 'staff' as View, label: t.staff, icon: Users },
+    { id: 'expenses' as View, label: t.expenses, icon: ReceiptIndianRupee },
+    { id: 'advisor' as View, label: t.advisor, icon: Sparkles },
+  ]
 
-    return () => {
-      subscription.unsubscribe();
-    };
-  }, []);
+  const page = {
+    dashboard: <Dashboard data={data} language={language} openModal={setModal} navigate={navigate} />,
+    inventory: <Inventory data={data} language={language} setData={setData} openModal={setModal} />,
+    parties: <Parties data={data} language={language} setData={setData} openModal={setModal} />,
+    staff: <StaffAttendance data={data} language={language} setData={setData} notify={showToast} />,
+    expenses: <Expenses data={data} language={language} openModal={setModal} />,
+    advisor: <Advisor data={data} language={language} />,
+  }[view]
 
-  useEffect(() => {
-    const unsubStatus = schemaStatus.onChange((missing) => {
-      setIsTablesMissing(missing);
-    });
-    return () => unsubStatus();
-  }, []);
+  return <div className="min-h-screen bg-[#e9e5dc] text-ink">
+    <AnimatePresence>{toast && <motion.div initial={{ opacity: 0, y: -16 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="fixed left-1/2 top-4 z-[70] flex -translate-x-1/2 items-center gap-2 rounded-full bg-ink px-4 py-2.5 text-sm font-semibold text-white shadow-xl"><Check size={16} className="text-[#e0b875]" />{toast}</motion.div>}</AnimatePresence>
 
-  // App core database state
-  const [products, setProducts] = useState<Product[]>([]);
-  const [movements, setMovements] = useState<StockMovement[]>([]);
-  const [contacts, setContacts] = useState<SupplierCustomer[]>([]);
-  const [staff, setStaff] = useState<Staff[]>([]);
-  const [attendance, setAttendance] = useState<Attendance[]>([]);
-  const [expenses, setExpenses] = useState<Expense[]>([]);
-  const [logs, setLogs] = useState<ActivityLog[]>([]);
-
-  // Subscribe to local emulated collections
-  useEffect(() => {
-    if (!user) return;
-
-    const unsubProducts = onSnapshot<Product>('products', setProducts);
-    const unsubMovements = onSnapshot<StockMovement>('movements', setMovements);
-    const unsubContacts = onSnapshot<SupplierCustomer>('contacts', setContacts);
-    const unsubStaff = onSnapshot<Staff>('staff', setStaff);
-    const unsubAttendance = onSnapshot<Attendance>('attendance', setAttendance);
-    const unsubExpenses = onSnapshot<Expense>('expenses', setExpenses);
-    const unsubLogs = onSnapshot<ActivityLog>('logs', setLogs);
-
-    return () => {
-      unsubProducts();
-      unsubMovements();
-      unsubContacts();
-      unsubStaff();
-      unsubAttendance();
-      unsubExpenses();
-      unsubLogs();
-    };
-  }, [user]);
-
-  const handleAuthSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setAuthError(null);
-    setAuthSubmitting(true);
-
-    try {
-      if (isSignUp) {
-        const { data, error } = await supabase.auth.signUp({
-          email: authEmail,
-          password: authPassword,
-        });
-        if (error) throw error;
-        
-        if (data?.user && !data.session) {
-          setAuthError('Registration successful! Please check your email inbox to verify your account.');
-        } else if (data?.user) {
-          setUser(data.user);
-        }
-      } else {
-        const { data, error } = await supabase.auth.signInWithPassword({
-          email: authEmail,
-          password: authPassword,
-        });
-        if (error) throw error;
-        setUser(data.user);
-      }
-    } catch (err: any) {
-      setAuthError(err.message || 'An error occurred during authentication');
-    } finally {
-      setAuthSubmitting(false);
-    }
-  };
-
-  const t = translations[lang];
-
-  // ==========================================
-  // HANDLERS: PRODUCTS & INVENTORY
-  // ==========================================
-  const handleAddProduct = (name: string, startingStock: number, costPrice: number, sellPrice: number, reorderThreshold?: number, type?: 'RawMaterial' | 'FinishedGood') => {
-    const newId = generateUUID();
-    const threshold = reorderThreshold !== undefined ? reorderThreshold : 10;
-    const status = startingStock > threshold ? 'In Stock' : startingStock > 0 ? 'Low Stock' : 'Out of Stock';
-    const newProduct: Product = {
-      id: newId,
-      name,
-      stock: startingStock,
-      costPerKg: costPrice,
-      pricePerKg: sellPrice,
-      status,
-      reorderThreshold: threshold,
-      createdAt: new Date().toISOString(),
-      type
-    };
-
-    const batch = writeBatch();
-    batch.set('products', newId, newProduct);
-
-    if (startingStock > 0) {
-      // Create starting stock transaction log
-      const movId = generateUUID();
-      const startingMovement: StockMovement = {
-        id: movId,
-        productId: newId,
-        productName: name,
-        type: 'IN',
-        quantity: startingStock,
-        pricePerKg: costPrice,
-        date: new Date().toISOString(),
-        notes: 'Initial inventory load'
-      };
-      batch.set('movements', movId, startingMovement);
-    }
-
-    batch.commit().then(() => {
-      logActivity(
-        'product_add',
-        lang === 'Telugu'
-          ? `కొత్త ఉత్పత్తిని చేర్చారు: ${name} (ప్రారంభ స్టాక్: ${startingStock} KGs)`
-          : `Added new product: ${name} with starting stock of ${startingStock} KG`
-      );
-    });
-  };
-
-  const handleReceiveStock = (productId: string, qty: number, costPerKg: number, notes?: string) => {
-    const targetProd = products.find((p) => p.id === productId);
-    if (!targetProd) return;
-
-    const newQty = targetProd.stock + qty;
-    const threshold = targetProd.reorderThreshold !== undefined ? targetProd.reorderThreshold : 10;
-    const newStatus = newQty > threshold ? 'In Stock' : newQty > 0 ? 'Low Stock' : 'Out of Stock';
-
-    const batch = writeBatch();
-    batch.set('products', productId, {
-      ...targetProd,
-      stock: newQty,
-      status: newStatus,
-      costPerKg: costPerKg // update cost price on new receive
-    });
-
-    const movId = generateUUID();
-    const newMovement: StockMovement = {
-      id: movId,
-      productId,
-      productName: targetProd.name,
-      type: 'IN',
-      quantity: qty,
-      pricePerKg: costPerKg,
-      date: new Date().toISOString(),
-      notes: notes || 'Received stock shipment'
-    };
-    batch.set('movements', movId, newMovement);
-
-    batch.commit().then(() => {
-      logActivity(
-        'stock_in',
-        lang === 'Telugu'
-          ? `స్టాక్ స్వీకరించారు: ${targetProd.name} (+${qty} KGs) ప్రతి కేజీ ₹${costPerKg}`
-          : `Received stock: ${targetProd.name} (+${qty} KG) at ₹${costPerKg}/KG`
-      );
-    });
-  };
-
-  const handleShipStock = (productId: string, qty: number, pricePerKg: number, notes?: string) => {
-    const targetProd = products.find((p) => p.id === productId);
-    if (!targetProd || targetProd.stock < qty) return;
-
-    const newQty = targetProd.stock - qty;
-    const threshold = targetProd.reorderThreshold !== undefined ? targetProd.reorderThreshold : 10;
-    const newStatus = newQty > threshold ? 'In Stock' : newQty > 0 ? 'Low Stock' : 'Out of Stock';
-
-    const batch = writeBatch();
-    batch.set('products', productId, {
-      ...targetProd,
-      stock: newQty,
-      status: newStatus,
-      pricePerKg: pricePerKg // update price on sales
-    });
-
-    const movId = generateUUID();
-    const newMovement: StockMovement = {
-      id: movId,
-      productId,
-      productName: targetProd.name,
-      type: 'OUT',
-      quantity: qty,
-      pricePerKg: pricePerKg,
-      date: new Date().toISOString(),
-      notes: notes || 'Invoiced sales order'
-    };
-    batch.set('movements', movId, newMovement);
-
-    batch.commit().then(() => {
-      logActivity(
-        'stock_out',
-        lang === 'Telugu'
-          ? `స్టాక్ విక్రయించారు: ${targetProd.name} (-${qty} KGs) ప్రతి కేజీ ₹${pricePerKg}`
-          : `Shipped stock: ${targetProd.name} (-${qty} KG) at ₹${pricePerKg}/KG`
-      );
-    });
-  };
-
-  const handleDeleteProduct = (id: string) => {
-    const prod = products.find((p) => p.id === id);
-    if (!prod) return;
-
-    deleteDoc('products', id).then(() => {
-      logActivity(
-        'product_add',
-        lang === 'Telugu' ? `ఉత్పత్తిని తొలగించారు: ${prod.name}` : `Deleted product: ${prod.name}`
-      );
-    });
-  };
-
-  // ==========================================
-  // HANDLERS: SUPPLIERS & CUSTOMERS
-  // ==========================================
-  const handleAddContact = (name: string, type: 'Supplier' | 'Customer', email: string, phone: string, address: string) => {
-    const newId = generateUUID();
-    const newContact: SupplierCustomer = { id: newId, name, type, email, phone, address };
-    setDoc('contacts', newId, newContact).then(() => {
-      logActivity(
-        'contact',
-        lang === 'Telugu'
-          ? `కొత్త ${type === 'Supplier' ? 'సరఫరాదారుడు' : 'కస్టమర్'} చేర్చారు: ${name}`
-          : `Added new ${type.toLowerCase()}: ${name}`
-      );
-    });
-  };
-
-  const handleEditContact = (id: string, name: string, type: 'Supplier' | 'Customer', email: string, phone: string, address: string) => {
-    const updated: SupplierCustomer = { id, name, type, email, phone, address };
-    setDoc('contacts', id, updated).then(() => {
-      logActivity(
-        'contact',
-        lang === 'Telugu' ? `కాంటాక్ట్ సవరించారు: ${name}` : `Updated contact registry: ${name}`
-      );
-    });
-  };
-
-  const handleDeleteContact = (id: string) => {
-    const contact = contacts.find((c) => c.id === id);
-    if (!contact) return;
-    deleteDoc('contacts', id).then(() => {
-      logActivity(
-        'contact',
-        lang === 'Telugu' ? `కాంటాక్ట్ తొలగించారు: ${contact.name}` : `Deleted contact registry: ${contact.name}`
-      );
-    });
-  };
-
-  // ==========================================
-  // HANDLERS: STAFF & ATTENDANCE
-  // ==========================================
-  const handleAddStaff = (name: string, role: string, salary: number) => {
-    const newId = generateUUID();
-    const newStaff: Staff = { id: newId, name, role, salary };
-    setDoc('staff', newId, newStaff).then(() => {
-      logActivity(
-        'attendance',
-        lang === 'Telugu'
-          ? `కొత్త సిబ్బంది చేర్చారు: ${name} (${role})`
-          : `Registered staff profile: ${name} (${role})`
-      );
-    });
-  };
-
-  const handleDeleteStaff = (id: string) => {
-    const member = staff.find((s) => s.id === id);
-    if (!member) return;
-    deleteDoc('staff', id).then(() => {
-      logActivity(
-        'attendance',
-        lang === 'Telugu' ? `సిబ్బందిని తొలగించారు: ${member.name}` : `Removed staff profile: ${member.name}`
-      );
-    });
-  };
-
-  const handleSaveAttendance = (date: string, statusMap: Record<string, 'Present' | 'Absent'>) => {
-    const attendanceRecord: Attendance = {
-      id: date,
-      date,
-      status: statusMap
-    };
-    setDoc('attendance', date, attendanceRecord).then(() => {
-      logActivity(
-        'attendance',
-        lang === 'Telugu'
-          ? `సిబ్బంది హాజరు నవీకరించబడింది: తేదీ ${date}`
-          : `Updated daily staff attendance ledger for: ${date}`
-      );
-    });
-  };
-
-  // ==========================================
-  // HANDLERS: EXPENSES LEDGER
-  // ==========================================
-  const handleAddExpense = (description: string, amount: number, category: string, status: 'Settled' | 'Pending', date: string) => {
-    const newId = generateUUID();
-    const newExpense: Expense = { id: newId, description, amount, category, status, date };
-    setDoc('expenses', newId, newExpense).then(() => {
-      logActivity(
-        'expense',
-        lang === 'Telugu'
-          ? `ఖర్చు నమోదు చేశారు: ${description} (₹${amount}) [${status}]`
-          : `Logged business outflow: ${description} (₹${amount}) [${status}]`
-      );
-    });
-  };
-
-  const handleDeleteExpense = (id: string) => {
-    const exp = expenses.find((e) => e.id === id);
-    if (!exp) return;
-    deleteDoc('expenses', id).then(() => {
-      logActivity(
-        'expense',
-        lang === 'Telugu' ? `ఖర్చు తొలగించారు: ${exp.description}` : `Removed expense log: ${exp.description}`
-      );
-    });
-  };
-
-  const handleToggleExpenseStatus = (id: string) => {
-    const exp = expenses.find((e) => e.id === id);
-    if (!exp) return;
-    const nextStatus = exp.status === 'Settled' ? 'Pending' : 'Settled';
-    setDoc('expenses', id, { ...exp, status: nextStatus }).then(() => {
-      logActivity(
-        'expense',
-        lang === 'Telugu'
-          ? `ఖర్చు స్థితి మార్చబడింది: ${exp.description} -> ${nextStatus}`
-          : `Toggled status: ${exp.description} is now ${nextStatus}`
-      );
-    });
-  };
-
-  // Sidebar Menu Config
-  const menuItems = [
-    { view: 'Dashboard' as ViewType, icon: LayoutDashboard },
-    { view: 'Stock & Inventory' as ViewType, icon: Box },
-    { view: 'Suppliers & Customers' as ViewType, icon: Users },
-    { view: 'Staff & Attendance' as ViewType, icon: CalendarDays },
-    { view: 'Expenses Ledger' as ViewType, icon: FileText },
-    { view: 'AI CFO Reports' as ViewType, icon: BrainCircuit },
-  ];
-
-  if (authLoading) {
-    return (
-      <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-4">
-        <div className="flex flex-col items-center space-y-4">
-          <div className="w-12 h-12 rounded-xl bg-indigo-600 flex items-center justify-center font-black text-slate-100 shadow-lg shadow-indigo-600/30 animate-bounce">
-            SF
-          </div>
-          <div className="flex items-center space-x-2 text-slate-500 font-medium text-xs font-mono">
-            <span className="w-2 h-2 rounded-full bg-indigo-600 animate-ping" />
-            <span>Establishing secure auth connection...</span>
-          </div>
+    <aside className={`grain fixed inset-y-0 left-0 z-40 hidden overflow-hidden bg-ink text-white transition-[width] duration-300 lg:block ${collapsed ? 'w-[84px]' : 'w-[260px]'}`}>
+      <div className="flex h-full flex-col">
+        <div className={`flex h-[86px] items-center border-b border-white/10 ${collapsed ? 'justify-center px-3' : 'gap-3 px-5'}`}>
+          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-[#d6a75f] text-ink"><Factory size={23} strokeWidth={2.2} /></div>
+          {!collapsed && <div className="min-w-0"><p className="truncate font-display text-[15px] font-extrabold leading-tight">{t.company}</p><p className="mt-1 truncate text-[10px] font-semibold uppercase tracking-[.15em] text-white/45">{t.subtitle}</p></div>}
+        </div>
+        <nav className="flex-1 space-y-1.5 px-3 py-5">
+          {nav.map(({ id, label, icon: Icon }) => <button key={id} onClick={() => navigate(id)} title={collapsed ? label : undefined} className={`group relative flex h-12 w-full items-center rounded-xl text-sm font-semibold transition ${collapsed ? 'justify-center' : 'gap-3 px-3.5'} ${view === id ? 'bg-white text-ink' : 'text-white/64 hover:bg-white/8 hover:text-white'}`}>
+            {view === id && <motion.span layoutId="nav-marker" className="absolute -left-3 h-6 w-1 rounded-r-full bg-[#d6a75f]" />}
+            <Icon size={19} /><span className={collapsed ? 'hidden' : 'truncate'}>{label}</span>
+          </button>)}
+        </nav>
+        <div className="border-t border-white/10 p-3">
+          {!collapsed && <div className="mb-3 rounded-xl border border-white/10 bg-white/[.05] p-3"><div className="mb-2 flex items-center gap-2 text-xs font-bold text-white"><span className="h-2 w-2 rounded-full bg-emerald-400" />{t.healthy}</div><p className="text-[11px] leading-relaxed text-white/45">{t.lastUpdated}</p></div>}
+          <button className={`flex h-10 w-full items-center rounded-xl text-white/50 transition hover:bg-white/10 hover:text-white ${collapsed ? 'justify-center' : 'gap-3 px-3'}`} onClick={() => setCollapsed(v => !v)} aria-label={collapsed ? t.expand : t.collapse}>{collapsed ? <PanelLeftOpen size={18} /> : <><PanelLeftClose size={18} /><span className="text-xs font-semibold">{t.collapse}</span></>}</button>
         </div>
       </div>
-    );
-  }
+    </aside>
 
-  if (!user) {
-    return (
-      <div className="min-h-screen bg-[#f8fafc] flex flex-col items-center justify-center p-4 md:p-6 select-none selection:bg-indigo-100 selection:text-indigo-800">
-        <div className="w-full max-w-md space-y-8">
-          
-          {/* Brand header */}
-          <div className="text-center space-y-3">
-            <div className="inline-flex w-14 h-14 rounded-2xl bg-indigo-600 items-center justify-center font-black text-slate-100 text-xl shadow-xl shadow-indigo-600/25">
-              SMI
-            </div>
-            <div className="space-y-1">
-              <h1 className="text-2xl font-black text-slate-900 tracking-tight">
-                {t.brandName}
-              </h1>
-              <p className="text-xs text-slate-400 uppercase font-black tracking-widest">
-                {t.subtitle} — SECURE PORTAL
-              </p>
-            </div>
-          </div>
+    <AnimatePresence>{mobileNav && <motion.div className="fixed inset-0 z-50 bg-ink/50 backdrop-blur-sm lg:hidden" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setMobileNav(false)}><motion.aside initial={{ x: -280 }} animate={{ x: 0 }} exit={{ x: -280 }} transition={{ type: 'spring', damping: 28, stiffness: 300 }} className="h-full w-[280px] bg-ink p-4 text-white" onClick={e => e.stopPropagation()}><div className="mb-6 flex items-center justify-between"><div className="flex items-center gap-3"><div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#d6a75f] text-ink"><Factory size={21} /></div><div><p className="font-display text-sm font-extrabold">{t.company}</p><p className="text-[10px] text-white/45">{t.subtitle}</p></div></div><button onClick={() => setMobileNav(false)} className="p-2 text-white/60"><X /></button></div><nav className="space-y-1">{nav.map(({ id, label, icon: Icon }) => <button key={id} onClick={() => navigate(id)} className={`flex h-12 w-full items-center gap-3 rounded-xl px-3 text-sm font-semibold ${view === id ? 'bg-white text-ink' : 'text-white/65'}`}><Icon size={19} />{label}</button>)}</nav></motion.aside></motion.div>}</AnimatePresence>
 
-          {/* Form card */}
-          <motion.div
-            initial={{ opacity: 0, y: 15 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="bg-white border border-slate-200/80 rounded-2xl p-6 md:p-8 shadow-xl shadow-slate-200/50 space-y-6"
-          >
-            <div className="space-y-1">
-              <h2 className="text-lg font-extrabold text-slate-900 tracking-tight">
-                {isSignUp ? 'Create an Account' : 'Welcome Back'}
-              </h2>
-              <p className="text-xs text-slate-400">
-                {isSignUp ? 'Get started with your custom business terminal' : 'Sign in to access your dashboard & ledger'}
-              </p>
-            </div>
-
-            {authError && (
-              <motion.div
-                initial={{ opacity: 0, scale: 0.95 }}
-                animate={{ opacity: 1, scale: 1 }}
-                className={`p-3.5 rounded-xl border flex items-start space-x-3 text-xs ${
-                  authError.includes('successful') 
-                    ? 'bg-emerald-50 border-emerald-200 text-emerald-800' 
-                    : 'bg-red-50 border-red-200 text-red-800'
-                }`}
-              >
-                <AlertTriangle className={`w-4 h-4 shrink-0 mt-0.5 ${authError.includes('successful') ? 'text-emerald-500' : 'text-red-500'}`} />
-                <span className="font-semibold leading-relaxed">{authError}</span>
-              </motion.div>
-            )}
-
-            <form onSubmit={handleAuthSubmit} className="space-y-4">
-              <div className="space-y-1.5">
-                <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider block">
-                  Email Address
-                </label>
-                <div className="relative">
-                  <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
-                    <Mail className="w-4 h-4" />
-                  </div>
-                  <input
-                    type="email"
-                    required
-                    value={authEmail}
-                    onChange={(e) => setAuthEmail(e.target.value)}
-                    placeholder="name@company.com"
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2.5 pl-10 pr-4 text-xs font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-600/10 focus:border-indigo-600 transition-all placeholder:text-slate-400"
-                  />
-                </div>
-              </div>
-
-              <div className="space-y-1.5">
-                <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider block">
-                  Password
-                </label>
-                <div className="relative">
-                  <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
-                    <Lock className="w-4 h-4" />
-                  </div>
-                  <input
-                    type="password"
-                    required
-                    value={authPassword}
-                    onChange={(e) => setAuthPassword(e.target.value)}
-                    placeholder="••••••••"
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2.5 pl-10 pr-4 text-xs font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-600/10 focus:border-indigo-600 transition-all placeholder:text-slate-400"
-                  />
-                </div>
-              </div>
-
-              <button
-                type="submit"
-                disabled={authSubmitting}
-                className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs py-3 px-4 rounded-xl shadow shadow-indigo-600/20 hover:shadow-indigo-600/30 transition-all duration-150 cursor-pointer flex items-center justify-center space-x-2 disabled:opacity-50"
-              >
-                <span>{authSubmitting ? 'Authenticating...' : isSignUp ? 'Sign Up' : 'Sign In'}</span>
-              </button>
-            </form>
-
-            <div className="border-t border-slate-100 pt-4 text-center">
-              <button
-                type="button"
-                onClick={() => {
-                  setIsSignUp(!isSignUp);
-                  setAuthError(null);
-                }}
-                className="text-[11px] font-bold text-indigo-600 hover:text-indigo-800 hover:underline transition-colors cursor-pointer"
-              >
-                {isSignUp ? 'Already have an account? Sign In' : "Don't have an account? Sign Up"}
-              </button>
-            </div>
-          </motion.div>
-
-          <p className="text-center text-[10px] text-slate-400 font-mono">
-            Securely connected to Supabase Instance ID dghnymvkqkhfjbwjmcok
-          </p>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="min-h-screen bg-[#F8F9FA] text-slate-800 flex flex-col md:flex-row antialiased selection:bg-amber-100 selection:text-amber-900">
-      
-      {/* 1. Mobile Top Bar */}
-      <div className="md:hidden bg-white border-b border-slate-200 px-4 py-3 flex items-center justify-between z-20">
-        <div className="flex items-center space-x-2">
-          <div className="w-8 h-8 rounded-lg bg-indigo-600 flex items-center justify-center font-bold text-slate-100 shadow shadow-indigo-600/30">
-            S
-          </div>
-          <span className="font-bold text-sm tracking-tight text-slate-900">{t.brandName}</span>
-        </div>
-        <div className="flex items-center space-x-2">
-          {/* Mobile Language Toggle */}
-          <button
-            onClick={() => setLang(lang === 'English' ? 'Telugu' : 'English')}
-            className="p-1.5 bg-slate-100 border border-slate-200 text-[10px] font-bold text-indigo-600 rounded-md"
-          >
-            {lang === 'English' ? 'భాష' : 'EN'}
-          </button>
-          <button
-            onClick={() => setIsMobileOpen(!isMobileOpen)}
-            className="p-1.5 text-slate-500 hover:text-slate-800 bg-slate-100 border border-slate-200 rounded-md"
-          >
-            <Menu className="w-5 h-5" />
-          </button>
-        </div>
-      </div>
-
-      {/* Mobile Drawer menu list */}
-      <AnimatePresence>
-        {isMobileOpen && (
-          <motion.div
-            initial={{ opacity: 0, y: -20 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -20 }}
-            className="absolute top-14 left-0 right-0 md:hidden bg-white border-b border-slate-200 p-4 z-10 space-y-2.5 shadow-xl"
-          >
-            {menuItems.map((item) => (
-              <button
-                key={item.view}
-                onClick={() => {
-                  setActiveView(item.view);
-                  setIsMobileOpen(false);
-                }}
-                className={`w-full text-left flex items-center space-x-3 p-3 rounded-xl text-xs font-semibold tracking-wide transition-colors ${
-                  activeView === item.view
-                    ? 'bg-indigo-600 text-white shadow'
-                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
-                }`}
-              >
-                <item.icon className="w-4 h-4" />
-                <span>{t.views[item.view]}</span>
-              </button>
-            ))}
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* 2. Light Navigation Sidebar for Desktop */}
-      <motion.aside
-        id="navigation_sidebar"
-        animate={{ width: sidebarCollapsed ? '76px' : '260px' }}
-        className="hidden md:flex flex-col justify-between bg-white border-r border-slate-200/80 p-4 relative shrink-0 z-10 select-none"
-      >
-        {/* Collapse button trigger */}
-        <button
-          onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-          className="absolute -right-3 top-6 w-6 h-6 rounded-full bg-white border border-slate-200 text-slate-400 hover:text-[#B48243] flex items-center justify-center shadow transition-transform hover:scale-105 cursor-pointer animate-none"
-        >
-          {sidebarCollapsed ? <ChevronRight className="w-3.5 h-3.5" /> : <ChevronLeft className="w-3.5 h-3.5" />}
-        </button>
-
-        {/* Brand segment */}
-        <div className="space-y-6">
-          <div className="flex items-center space-x-3 px-2">
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-[#B48243] to-[#D2A267] flex items-center justify-center shrink-0 shadow-sm">
-              <span className="text-white font-serif font-black text-xs">SMI</span>
-            </div>
-            {!sidebarCollapsed && (
-              <div className="space-y-0.5">
-                <span className="font-serif font-bold text-sm text-slate-900 block tracking-tight leading-none">{t.brandName}</span>
-                <span className="text-[9px] text-[#B48243] block uppercase font-bold tracking-widest leading-none">{t.subtitle}</span>
-              </div>
-            )}
-          </div>
-
-          {/* Menu Items */}
-          <div className="space-y-1">
-            {menuItems.map((item) => {
-              const isAiCfo = item.view === 'AI CFO Reports';
-              const isActive = activeView === item.view;
-              
-              if (isAiCfo) {
-                return (
-                  <button
-                    key={item.view}
-                    onClick={() => setActiveView(item.view)}
-                    className={`w-full text-left flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-semibold tracking-wide transition-all cursor-pointer ${
-                      isActive
-                        ? 'bg-[#1E293B] text-white shadow-md shadow-slate-900/25 border border-slate-700'
-                        : 'text-slate-600 hover:text-slate-950 hover:bg-slate-100/50'
-                    }`}
-                    title={t.views[item.view]}
-                  >
-                    <div className="flex items-center space-x-3">
-                      <item.icon className={`w-4 h-4 shrink-0 ${isActive ? 'text-[#D2A267]' : 'text-slate-500'}`} />
-                      {!sidebarCollapsed && <span>{t.views[item.view]}</span>}
-                    </div>
-                    {!sidebarCollapsed && (
-                      <span className={`text-[8px] px-1.5 py-0.5 rounded font-extrabold tracking-wider ${
-                        isActive ? 'bg-[#D2A267] text-white' : 'bg-amber-50 text-[#B48243]'
-                      }`}>
-                        AI
-                      </span>
-                    )}
-                  </button>
-                );
-              }
-
-              return (
-                <button
-                  key={item.view}
-                  onClick={() => setActiveView(item.view)}
-                  className={`w-full text-left flex items-center space-x-3 px-3 py-2.5 rounded-xl text-xs font-semibold tracking-wide transition-all cursor-pointer ${
-                    isActive
-                      ? 'bg-[#FAF3EA] text-[#B48243] font-bold shadow-sm'
-                      : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100/60'
-                  }`}
-                  title={t.views[item.view]}
-                >
-                  <item.icon className={`w-4 h-4 shrink-0 ${isActive ? 'text-[#B48243]' : 'text-slate-400'}`} />
-                  {!sidebarCollapsed && <span>{t.views[item.view]}</span>}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* Bottom user credentials, translation switch, and branding */}
-        <div className="space-y-4">
-          
-          {/* English / Telugu language translation card toggle */}
-          <div className="border-t border-slate-200 pt-4">
-            <div className={`flex items-center justify-between gap-2 ${sidebarCollapsed ? 'flex-col items-center' : ''}`}>
-              {!sidebarCollapsed && (
-                <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider flex items-center space-x-1">
-                  <Globe className="w-3 h-3 text-[#B48243]" />
-                  <span>{t.language}</span>
-                </span>
-              )}
-              
-              <div className="flex items-center bg-slate-100 border border-slate-200 rounded-lg p-0.5">
-                <button
-                  onClick={() => setLang('English')}
-                  className={`px-2 py-0.5 text-[9px] font-bold rounded transition-all cursor-pointer ${
-                    lang === 'English'
-                      ? 'bg-white text-slate-900 shadow-sm'
-                      : 'text-slate-500 hover:text-slate-800'
-                  }`}
-                >
-                  EN
-                </button>
-                <button
-                  onClick={() => setLang('Telugu')}
-                  className={`px-2 py-0.5 text-[9px] font-bold rounded transition-all cursor-pointer ${
-                    lang === 'Telugu'
-                      ? 'bg-white text-slate-900 shadow-sm'
-                      : 'text-slate-500 hover:text-slate-800'
-                  }`}
-                >
-                  తెలుగు
-                </button>
-              </div>
-            </div>
-          </div>
-
-
-
-          {/* Active Administrator Card */}
-          <div className="bg-slate-50 border border-slate-200 p-2.5 rounded-xl flex items-center justify-between overflow-hidden">
-            <div className="flex items-center space-x-2.5 min-w-0">
-              <div className="w-8 h-8 rounded-lg bg-amber-50/80 border border-amber-100 text-[#B48243] flex items-center justify-center shrink-0">
-                <User className="w-4 h-4" />
-              </div>
-              {!sidebarCollapsed && (
-                <div className="space-y-0.5 min-w-0">
-                  <span className="text-[10px] text-slate-700 font-bold block truncate">{t.activeAdmin}</span>
-                  <span className="text-[9px] text-slate-500 block truncate font-mono">{user?.email || 'Active User'}</span>
-                </div>
-              )}
-            </div>
-            {!sidebarCollapsed ? (
-              <button
-                onClick={() => supabase.auth.signOut()}
-                className="text-[10px] font-bold text-red-600 hover:text-red-800 hover:underline cursor-pointer ml-1 select-none flex-shrink-0"
-              >
-                Log Out
-              </button>
-            ) : (
-              <button
-                onClick={() => supabase.auth.signOut()}
-                className="w-4 h-4 text-slate-400 hover:text-red-500 cursor-pointer flex items-center justify-center select-none flex-shrink-0"
-                title="Log Out"
-              >
-                <LogOut className="w-3.5 h-3.5" />
-              </button>
-            )}
-          </div>
-
-        </div>
-      </motion.aside>
-
-      {/* 3. Main View Area */}
-      <main className="flex-1 p-4 md:p-6 lg:p-8 overflow-y-auto space-y-6">
-        
-        {/* Title row */}
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-2 border-b border-slate-200 pb-4">
-          <div>
-            <h1 className="text-2xl font-serif font-extrabold text-slate-900 tracking-tight flex items-center space-x-2">
-              <span>{t.views[activeView]}</span>
-              {activeView === 'AI CFO Reports' && (
-                <span className="text-[9px] bg-amber-50 border border-amber-100 text-[#B48243] px-2 py-0.5 rounded-full uppercase font-bold tracking-wider animate-pulse">
-                  AI Active
-                </span>
-              )}
-            </h1>
-            <p className="text-xs text-slate-500">
-              {lang === 'Telugu' ? 'శ్రీ మల్లికార్జున ఇండస్ట్రీస్ రియల్ టైమ్ ఆర్థిక నివేదిక ప్యానెల్' : 'Sri Mallikarjuna Industries real-time financial tracking dashboard'}
-            </p>
-          </div>
-          
-          <div className="flex items-center space-x-2 font-mono text-[10px] text-slate-400">
-            <span>2026-07-06</span>
-            <span>•</span>
-            <span>UTC Clock</span>
-          </div>
-        </div>
-
-
-
-        {/* Render Selected View */}
-        <div className="min-h-[500px]">
-          {activeView === 'Dashboard' && (
-            <DashboardView
-              products={products}
-              movements={movements}
-              expenses={expenses}
-              staff={staff}
-              logs={logs}
-              lang={lang}
-            />
-          )}
-
-          {activeView === 'Stock & Inventory' && (
-            <StockInventoryView
-              products={products}
-              movements={movements}
-              contacts={contacts}
-              onAddProduct={handleAddProduct}
-              onReceiveStock={handleReceiveStock}
-              onShipStock={handleShipStock}
-              onDeleteProduct={handleDeleteProduct}
-              lang={lang}
-            />
-          )}
-
-          {activeView === 'Suppliers & Customers' && (
-            <SuppliersCustomersView
-              contacts={contacts}
-              onAddContact={handleAddContact}
-              onEditContact={handleEditContact}
-              onDeleteContact={handleDeleteContact}
-              lang={lang}
-            />
-          )}
-
-          {activeView === 'Staff & Attendance' && (
-            <StaffAttendanceView
-              staff={staff}
-              attendance={attendance}
-              onAddStaff={handleAddStaff}
-              onDeleteStaff={handleDeleteStaff}
-              onSaveAttendance={handleSaveAttendance}
-              lang={lang}
-            />
-          )}
-
-          {activeView === 'Expenses Ledger' && (
-            <ExpensesLedgerView
-              expenses={expenses}
-              onAddExpense={handleAddExpense}
-              onDeleteExpense={handleDeleteExpense}
-              onToggleExpenseStatus={handleToggleExpenseStatus}
-              lang={lang}
-            />
-          )}
-
-          {activeView === 'AI CFO Reports' && (
-            <AiCfoReportsView
-              products={products}
-              movements={movements}
-              expenses={expenses}
-              staff={staff}
-              logs={logs}
-              lang={lang}
-            />
-          )}
-        </div>
-
-      </main>
-
-      
-
+    <div className={`min-h-screen transition-[margin] duration-300 ${collapsed ? 'lg:ml-[84px]' : 'lg:ml-[260px]'}`}>
+      <header className="sticky top-0 z-30 flex h-[72px] items-center justify-between border-b border-black/[0.06] bg-[#f5f0e7]/90 px-4 backdrop-blur-xl sm:px-6 lg:px-8">
+        <div className="flex items-center gap-3"><button className="icon-btn lg:hidden" onClick={() => setMobileNav(true)} aria-label={t.menu}><Menu size={19} /></button><div><p className="text-[11px] font-bold uppercase tracking-[.16em] text-brass">{t.overview}</p><p className="hidden text-xs text-slate-500 sm:block">{t.appTagline}</p></div></div>
+        <div className="flex items-center gap-2 sm:gap-3"><button onClick={() => setLanguage(l => l === 'en' ? 'te' : 'en')} className="btn-secondary !px-3" aria-label="Switch language"><Globe2 size={16} /><span>{t.language}</span></button><button onClick={() => setModal('in')} className="btn-primary hidden sm:inline-flex"><Plus size={16} />{t.receive}</button><div className="hidden h-9 w-px bg-black/10 md:block" /><div className="hidden items-center gap-2 md:flex"><div className="flex h-9 w-9 items-center justify-center rounded-full bg-pine text-xs font-bold text-white">SM</div><div className="leading-tight"><p className="text-xs font-bold">Mallikarjuna</p><p className="text-[10px] text-slate-500">Owner</p></div></div></div>
+      </header>
+      <main className="mx-auto max-w-[1600px] p-4 sm:p-6 lg:p-8"><AnimatePresence mode="wait"><motion.div key={`${view}-${language}`} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }} transition={{ duration: .22 }}>{page}</motion.div></AnimatePresence></main>
     </div>
-  );
+
+    <TransactionModal kind={modal === 'in' || modal === 'out' ? modal : null} data={data} language={language} close={() => setModal(null)} commit={setData} notify={showToast} />
+    <ExpenseModal open={modal === 'expense'} data={data} language={language} close={() => setModal(null)} commit={setData} notify={showToast} />
+    <PartyModal open={modal === 'party'} data={data} language={language} close={() => setModal(null)} commit={setData} notify={showToast} />
+  </div>
 }
+
+function Dashboard({ data, language, openModal, navigate }: { data: AppData; language: Language; openModal: (m: ModalKind) => void; navigate: (v: View) => void }) {
+  const t = useCopy(language)
+  const stats = useStats(data)
+  const quick = [{ label: t.receive, icon: ArrowDownLeft, modal: 'in' as ModalKind }, { label: t.dispatch, icon: ArrowUpRight, modal: 'out' as ModalKind }, { label: t.logExpense, icon: ReceiptIndianRupee, modal: 'expense' as ModalKind }, { label: t.attendance, icon: CalendarCheck, modal: null, view: 'staff' as View }]
+  const cards = [
+    { label: t.totalStock, value: `${number(stats.totalStock)} kg`, sub: `${(stats.totalStock / 1000).toFixed(2)} ${t.mt}`, icon: Boxes, color: 'bg-pine text-white' },
+    { label: t.inventoryValue, value: money(stats.costValue, true), sub: `${t.potential}: ${money(stats.sellValue, true)}`, icon: WalletCards, color: 'bg-[#ead7b7] text-ink' },
+    { label: t.monthlyMovement, value: `${number(stats.outbound)} kg`, sub: `${t.inbound}: ${number(stats.inbound)} kg`, icon: Truck, color: 'bg-[#dce5df] text-pine' },
+    { label: t.monthlyExpenses, value: money(stats.expenses, true), sub: `${t.pending}: ${money(stats.pending, true)}`, icon: ReceiptIndianRupee, color: 'bg-[#eadfd8] text-[#8f4d33]' },
+    { label: t.netProfit, value: money(stats.operatingProfit, true), sub: `${stats.margin.toFixed(1)}% ${t.margin}`, icon: TrendingUp, color: 'bg-[#d6a75f] text-ink' },
+  ]
+  const maxFlow = Math.max(stats.inbound, stats.outbound, 1)
+  return <>
+    <PageIntro eyebrow={t.factoryPulse} title={t.dashboard} description={t.lastUpdated} action={<div className="flex items-center gap-2"><span className="h-2 w-2 animate-pulse rounded-full bg-emerald-500" /><span className="text-xs font-semibold text-emerald-700">{t.live}</span></div>} />
+    <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">{cards.map(({ label, value, sub, icon: Icon, color }, i) => <motion.article key={label} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * .04 }} className="card p-4"><div className="mb-4 flex items-start justify-between"><p className="max-w-[150px] text-xs font-semibold leading-snug text-slate-500">{label}</p><span className={`flex h-9 w-9 items-center justify-center rounded-xl ${color}`}><Icon size={17} /></span></div><p className="num font-display text-2xl font-extrabold tracking-tight">{value}</p><p className="mt-1 text-[11px] font-medium text-slate-500">{sub}</p></motion.article>)}</div>
+    <div className="mt-5 grid gap-5 xl:grid-cols-[1.35fr_.85fr]">
+      <section className="card overflow-hidden"><div className="flex items-center justify-between border-b border-black/[0.06] px-5 py-4"><div><h2 className="font-display text-base font-bold">{t.recentActivity}</h2><p className="mt-0.5 text-xs text-slate-500">{t.operationalSnapshot}</p></div><button className="text-xs font-bold text-pine hover:underline" onClick={() => navigate('inventory')}>{t.viewAll}</button></div><div className="divide-y divide-black/[0.05]">{data.activities.slice(0, 5).map((a, i) => { const Icon = a.type === 'stock' ? PackageCheck : a.type === 'expense' ? ReceiptIndianRupee : a.type === 'attendance' ? ClipboardCheck : Building2; return <div key={a.id} className="flex items-center gap-3 px-5 py-3.5"><span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${a.type === 'stock' ? 'bg-emerald-50 text-emerald-700' : a.type === 'expense' ? 'bg-amber-50 text-amber-700' : 'bg-sky-50 text-sky-700'}`}><Icon size={17} /></span><div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold">{a.message}</p><p className="mt-0.5 text-[11px] text-slate-400">{new Intl.DateTimeFormat(language === 'te' ? 'te-IN' : 'en-IN', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(a.timestamp))}</p></div><ArrowRight size={15} className="text-slate-300" /></div>})}</div></section>
+      <section className="card p-5"><div className="mb-5 flex items-center justify-between"><div><h2 className="font-display text-base font-bold">{t.monthlyMovement}</h2><p className="mt-0.5 text-xs text-slate-500">{t.thisMonth}</p></div><StatusPill tone="green">+12.4%</StatusPill></div><div className="space-y-5"><div><div className="mb-2 flex justify-between text-xs font-semibold"><span>{t.inbound}</span><span className="num">{number(stats.inbound)} kg</span></div><div className="h-3 overflow-hidden rounded-full bg-slate-100"><motion.div initial={{ width: 0 }} animate={{ width: `${stats.inbound / maxFlow * 100}%` }} className="h-full rounded-full bg-pine" /></div></div><div><div className="mb-2 flex justify-between text-xs font-semibold"><span>{t.outbound}</span><span className="num">{number(stats.outbound)} kg</span></div><div className="h-3 overflow-hidden rounded-full bg-slate-100"><motion.div initial={{ width: 0 }} animate={{ width: `${stats.outbound / maxFlow * 100}%` }} className="h-full rounded-full bg-brass" /></div></div></div><div className="mt-7 grid grid-cols-3 gap-2 border-t border-black/[0.06] pt-5"><MiniMetric label={t.labour} value={money(stats.labour, true)} /><MiniMetric label={t.power} value={money(stats.power, true)} /><MiniMetric label={t.freight} value={money(stats.freight, true)} /></div></section>
+    </div>
+    <section className="mt-5 card p-5"><div className="mb-4"><h2 className="font-display text-base font-bold">{t.quickActions}</h2><p className="mt-0.5 text-xs text-slate-500">{t.appTagline}</p></div><div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">{quick.map(({ label, icon: Icon, modal, view }) => <button key={label} onClick={() => view ? navigate(view) : openModal(modal)} className="group flex items-center gap-3 rounded-xl border border-slate-200 bg-white p-3 text-left transition hover:-translate-y-0.5 hover:border-brass/50 hover:shadow-md"><span className="flex h-10 w-10 items-center justify-center rounded-xl bg-parchment text-pine transition group-hover:bg-ink group-hover:text-white"><Icon size={18} /></span><span className="text-sm font-bold">{label}</span><ChevronRight size={16} className="ml-auto text-slate-300" /></button>)}</div></section>
+  </>
+}
+
+function Inventory({ data, language, setData, openModal }: { data: AppData; language: Language; setData: (d: AppData) => void; openModal: (m: ModalKind) => void }) {
+  const t = useCopy(language)
+  const [query, setQuery] = useState('')
+  const [filter, setFilter] = useState<'all' | Product['type']>('all')
+  const filtered = data.products.filter(p => (filter === 'all' || p.type === filter) && p.name.toLowerCase().includes(query.toLowerCase()))
+  const exportCsv = () => { const rows = [['Batch','Product','Type','Stock KG','Cost/KG','Price/KG','Margin %','Status'], ...filtered.map(p => [p.batch,p.name,p.type,p.stock,p.costPerKg,p.pricePerKg,((p.pricePerKg-p.costPerKg)/p.costPerKg*100).toFixed(1),p.status])]; const blob = new Blob([rows.map(r => r.map(v => `"${v}"`).join(',')).join('\n')], { type: 'text/csv' }); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `smi-inventory-${today()}.csv`; a.click(); URL.revokeObjectURL(a.href) }
+  const refreshStatuses = () => setData({ ...data, products: data.products.map(p => ({ ...p, status: p.stock <= 0 ? 'Out of Stock' : p.stock <= p.reorderThreshold ? 'Low Stock' : 'In Stock' })) })
+  useEffect(refreshStatuses, []) // eslint-disable-line react-hooks/exhaustive-deps
+  return <>
+    <PageIntro eyebrow={t.live} title={t.inventory} description={`${number(data.products.reduce((s, p) => s + p.stock, 0))} kg · ${data.products.length} ${t.grade.toLowerCase()}`} action={<div className="flex gap-2"><button className="btn-secondary" onClick={exportCsv}><Download size={16} />{t.exportCsv}</button><button className="btn-primary" onClick={() => openModal('in')}><Plus size={16} />{t.receive}</button></div>} />
+    <div className="card overflow-hidden"><div className="flex flex-col gap-3 border-b border-black/[0.06] p-4 md:flex-row md:items-center md:justify-between"><div className="relative max-w-md flex-1"><Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" /><input value={query} onChange={e => setQuery(e.target.value)} className="input !pl-9" placeholder={`${t.search} ${t.grade.toLowerCase()}…`} /></div><div className="flex flex-wrap gap-2">{([{ id: 'all', label: t.allProducts }, { id: 'FinishedGood', label: t.finishedGood }, { id: 'RawMaterial', label: t.rawMaterial }] as const).map(x => <button key={x.id} onClick={() => setFilter(x.id)} className={`rounded-lg px-3 py-2 text-xs font-bold transition ${filter === x.id ? 'bg-ink text-white' : 'bg-parchment text-slate-600 hover:text-ink'}`}>{x.label}</button>)}<button className="btn-secondary !py-2" onClick={() => openModal('out')}><ArrowUpRight size={15} />{t.dispatch}</button></div></div>
+      <div className="table-scroll overflow-x-auto"><table className="w-full min-w-[900px] text-left"><thead className="sticky top-0 bg-[#f7f3eb] text-[10px] font-bold uppercase tracking-[.12em] text-slate-500"><tr>{[t.batch,t.grade,t.type,t.stock,t.costKg,t.priceKg,t.margin,t.status,t.actions].map(h => <th key={h} className="px-4 py-3">{h}</th>)}</tr></thead><tbody className="divide-y divide-black/[0.05]">{filtered.map(p => { const margin = (p.pricePerKg - p.costPerKg) / p.costPerKg * 100; return <tr key={p.id} className="bg-cream transition hover:bg-white"><td className="px-4 py-4 font-mono text-[11px] text-slate-500">{p.batch}</td><td className="px-4 py-4"><p className="text-sm font-bold">{p.name}</p>{p.stock <= p.reorderThreshold && <span className="mt-1 inline-flex items-center gap-1 text-[10px] font-bold text-amber-700"><TrendingDown size={11} />{t.reorder}: {number(p.reorderThreshold)} kg</span>}</td><td className="px-4 py-4 text-xs text-slate-500">{p.type === 'RawMaterial' ? t.rawMaterial : t.finishedGood}</td><td className="num px-4 py-4 text-sm font-bold">{number(p.stock)} <span className="font-normal text-slate-400">kg</span></td><td className="num px-4 py-4 text-sm">{money(p.costPerKg)}</td><td className="num px-4 py-4 text-sm">{money(p.pricePerKg)}</td><td className="px-4 py-4"><span className="font-mono text-sm font-bold text-emerald-700">{margin.toFixed(1)}%</span></td><td className="px-4 py-4"><StatusPill tone={p.status === 'In Stock' ? 'green' : p.status === 'Low Stock' ? 'amber' : 'red'}>{p.status === 'In Stock' ? t.inStock : p.status === 'Low Stock' ? t.lowStock : t.outOfStock}</StatusPill></td><td className="px-4 py-4"><button onClick={() => openModal('out')} className="text-xs font-bold text-pine hover:underline">{t.dispatch}</button></td></tr> })}</tbody></table>{!filtered.length && <div className="p-5"><Empty text={t.noResults} /></div>}</div>
+    </div>
+  </>
+}
+
+function Parties({ data, language, setData, openModal }: { data: AppData; language: Language; setData: (d: AppData) => void; openModal: (m: ModalKind) => void }) {
+  const t = useCopy(language); const [filter, setFilter] = useState<'all' | SupplierCustomer['type']>('all'); const [query, setQuery] = useState(''); const [selected, setSelected] = useState<SupplierCustomer | null>(null)
+  const parties = data.parties.filter(p => (filter === 'all' || p.type === filter) && `${p.name} ${p.address}`.toLowerCase().includes(query.toLowerCase()))
+  return <><PageIntro eyebrow="CRM · PARTY LEDGER" title={t.parties} description={`${data.parties.filter(p => p.type === 'Supplier').length} ${t.supplier.toLowerCase()} · ${data.parties.filter(p => p.type === 'Customer').length} ${t.customer.toLowerCase()}`} action={<button className="btn-primary" onClick={() => openModal('party')}><UserRoundPlus size={16} />{t.addParty}</button>} />
+    <div className="mb-5 flex flex-col gap-3 sm:flex-row"><div className="relative flex-1"><Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" /><input className="input !pl-9" value={query} onChange={e => setQuery(e.target.value)} placeholder={`${t.search}…`} /></div><div className="flex rounded-xl border border-slate-200 bg-white p-1">{([{ id: 'all', label: t.allParties }, { id: 'Supplier', label: t.supplier }, { id: 'Customer', label: t.customer }] as const).map(x => <button key={x.id} onClick={() => setFilter(x.id)} className={`rounded-lg px-3 py-2 text-xs font-bold ${filter === x.id ? 'bg-ink text-white' : 'text-slate-500'}`}>{x.label}</button>)}</div></div>
+    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{parties.map(p => { const tx = data.movements.filter(m => m.party === p.name); return <article key={p.id} className="card group p-5 transition hover:-translate-y-0.5 hover:shadow-lg"><div className="mb-5 flex items-start justify-between"><div className={`flex h-11 w-11 items-center justify-center rounded-2xl ${p.type === 'Supplier' ? 'bg-[#ead7b7] text-amber-900' : 'bg-[#dce5df] text-pine'}`}><Building2 size={20} /></div><StatusPill tone={p.type === 'Supplier' ? 'amber' : 'green'}>{p.type === 'Supplier' ? t.supplier : t.customer}</StatusPill></div><h3 className="font-display text-base font-extrabold">{p.name}</h3><p className="mt-1 min-h-10 text-xs leading-relaxed text-slate-500">{p.address}</p><div className="mt-4 space-y-2 border-t border-black/[0.05] pt-4 text-xs"><p className="truncate text-slate-600"><span className="mr-2 text-slate-400">{t.phone}</span>{p.phone}</p><p className="truncate text-slate-600"><span className="mr-2 text-slate-400">{t.email}</span>{p.email}</p></div><button onClick={() => setSelected(p)} className="mt-4 flex w-full items-center justify-between rounded-xl bg-parchment px-3 py-2.5 text-xs font-bold transition group-hover:bg-ink group-hover:text-white"><span>{t.transactionHistory}</span><span>{tx.length} <ArrowRight size={13} className="ml-1 inline" /></span></button></article>})}</div>{!parties.length && <Empty text={t.noResults} />}
+    <Modal open={!!selected} onClose={() => setSelected(null)} title={selected?.name || ''}>{selected && <div><div className="mb-5 grid grid-cols-2 gap-3"><div className="rounded-xl bg-parchment p-3"><p className="text-[10px] font-bold uppercase text-slate-400">{t.type}</p><p className="mt-1 text-sm font-bold">{selected.type === 'Supplier' ? t.supplier : t.customer}</p></div><div className="rounded-xl bg-parchment p-3"><p className="text-[10px] font-bold uppercase text-slate-400">{t.transactionHistory}</p><p className="mt-1 text-sm font-bold">{data.movements.filter(m => m.party === selected.name).length}</p></div></div><div className="space-y-2">{data.movements.filter(m => m.party === selected.name).map(m => <div key={m.id} className="flex items-center justify-between rounded-xl border border-slate-100 bg-white p-3"><div><p className="text-sm font-bold">{m.productName}</p><p className="mt-0.5 text-xs text-slate-400">{m.date}</p></div><p className={`num text-sm font-bold ${m.type === 'IN' ? 'text-emerald-700' : 'text-amber-700'}`}>{m.type} · {number(m.quantity)} kg</p></div>)}{!data.movements.some(m => m.party === selected.name) && <Empty text={t.noTransactions} />}</div><button className="mt-5 text-xs font-semibold text-red-600" onClick={() => { setData({ ...data, parties: data.parties.filter(p => p.id !== selected.id) }); setSelected(null) }}>{t.delete}</button></div>}</Modal>
+  </>
+}
+
+function StaffAttendance({ data, language, setData, notify }: { data: AppData; language: Language; setData: (d: AppData) => void; notify: (s: string) => void }) {
+  const t = useCopy(language); const [date, setDate] = useState(today()); const existing = data.attendance.find(a => a.date === date); const [marks, setMarks] = useState<Record<string, 'Present' | 'Absent'>>(existing?.status || Object.fromEntries(data.staff.map(s => [s.id, 'Present'])))
+  useEffect(() => { const record = data.attendance.find(a => a.date === date); setMarks(record?.status || Object.fromEntries(data.staff.map(s => [s.id, 'Present']))) }, [date, data.attendance, data.staff])
+  const presentCount = (id: string) => data.attendance.filter(a => a.date.slice(0, 7) === date.slice(0, 7) && a.status[id] === 'Present').length + ((existing || date !== today()) ? 0 : marks[id] === 'Present' ? 1 : 0)
+  const save = () => { const record = { id: date, date, status: marks }; const attendance = data.attendance.some(a => a.date === date) ? data.attendance.map(a => a.date === date ? record : a) : [record, ...data.attendance]; setData({ ...data, attendance, activities: [{ id: uid('a'), type: 'attendance', message: `Attendance marked for ${Object.values(marks).filter(x => x === 'Present').length} workers`, timestamp: new Date().toISOString() }, ...data.activities] }); notify(t.attendanceSaved) }
+  const payroll = data.staff.reduce((sum, s) => sum + s.salary / 26 * presentCount(s.id), 0)
+  return <><PageIntro eyebrow="WORKFORCE · PAYROLL" title={t.staff} description={`${data.staff.length} ${t.workers.toLowerCase()} · 26 ${t.workingDays}`} action={<div className="rounded-xl bg-ink px-4 py-2.5 text-white"><p className="text-[9px] font-bold uppercase tracking-wider text-white/50">{t.monthlyPayroll}</p><p className="num font-display text-lg font-extrabold">{money(payroll)}</p></div>} />
+    <div className="grid gap-5 xl:grid-cols-[.72fr_1.28fr]"><section className="card overflow-hidden"><div className="border-b border-black/[0.06] px-5 py-4"><h2 className="font-display text-base font-bold">{t.workers}</h2></div><div className="divide-y divide-black/[0.05]">{data.staff.map(s => <div key={s.id} className="flex items-center gap-3 px-5 py-3"><span className="flex h-9 w-9 items-center justify-center rounded-full bg-[#e6dfd1] text-xs font-extrabold text-pine">{s.name.split(' ').map(x => x[0]).join('').slice(0,2)}</span><div className="min-w-0 flex-1"><p className="truncate text-sm font-bold">{s.name}</p><p className="text-[11px] text-slate-500">{language === 'te' ? roleTe[s.role] : s.role}</p></div><div className="text-right"><p className="num text-xs font-bold">{money(s.salary)}</p><p className="text-[10px] text-slate-400">/{t.thisMonth.toLowerCase()}</p></div></div>)}</div></section>
+    <section className="card overflow-hidden"><div className="flex flex-col gap-3 border-b border-black/[0.06] px-5 py-4 sm:flex-row sm:items-center sm:justify-between"><div><h2 className="font-display text-base font-bold">{t.attendanceSheet}</h2><p className="mt-0.5 text-xs text-slate-500">{Object.values(marks).filter(x => x === 'Present').length}/{data.staff.length} {t.present.toLowerCase()}</p></div><div className="flex gap-2"><input type="date" value={date} onChange={e => setDate(e.target.value)} className="input !w-auto !py-2" /><button className="btn-secondary !py-2" onClick={() => setMarks(Object.fromEntries(data.staff.map(s => [s.id, 'Present'])))}>{t.markAllPresent}</button></div></div><div className="table-scroll overflow-x-auto"><table className="w-full min-w-[620px]"><thead className="bg-[#f7f3eb] text-left text-[10px] font-bold uppercase tracking-wider text-slate-500"><tr><th className="px-5 py-3">{t.name}</th><th className="px-4 py-3">{t.role}</th><th className="px-4 py-3">{t.daysPresent}</th><th className="px-4 py-3">{t.payable}</th><th className="px-5 py-3 text-right">{t.status}</th></tr></thead><tbody className="divide-y divide-black/[0.05]">{data.staff.map(s => { const days = presentCount(s.id); return <tr key={s.id}><td className="px-5 py-3 text-sm font-bold">{s.name}</td><td className="px-4 py-3 text-xs text-slate-500">{language === 'te' ? roleTe[s.role] : s.role}</td><td className="num px-4 py-3 text-sm">{days}/26</td><td className="num px-4 py-3 text-sm font-semibold">{money(s.salary / 26 * days)}</td><td className="px-5 py-3"><div className="ml-auto flex w-fit rounded-lg bg-slate-100 p-1"><button onClick={() => setMarks({ ...marks, [s.id]: 'Present' })} className={`rounded-md px-2.5 py-1.5 text-[11px] font-bold ${marks[s.id] === 'Present' ? 'bg-emerald-600 text-white shadow-sm' : 'text-slate-500'}`}>{t.present}</button><button onClick={() => setMarks({ ...marks, [s.id]: 'Absent' })} className={`rounded-md px-2.5 py-1.5 text-[11px] font-bold ${marks[s.id] === 'Absent' ? 'bg-red-500 text-white shadow-sm' : 'text-slate-500'}`}>{t.absent}</button></div></td></tr>})}</tbody></table></div><div className="flex justify-end border-t border-black/[0.06] p-4"><button className="btn-primary" onClick={save}><Check size={16} />{t.saveAttendance}</button></div></section></div>
+  </>
+}
+
+function Expenses({ data, language, openModal }: { data: AppData; language: Language; openModal: (m: ModalKind) => void }) {
+  const t = useCopy(language); const [category, setCategory] = useState('all'); const [status, setStatus] = useState('all'); const [from, setFrom] = useState(''); const [to, setTo] = useState('')
+  const filtered = data.expenses.filter(e => (category === 'all' || e.category === category) && (status === 'all' || e.status === status) && (!from || e.date >= from) && (!to || e.date <= to)); const total = filtered.reduce((s,e) => s+e.amount,0); const byCat = categories.map(c => ({ name:c, value:data.expenses.filter(e=>e.category===c).reduce((s,e)=>s+e.amount,0) })).sort((a,b)=>b.value-a.value); const max = Math.max(...byCat.map(x=>x.value),1)
+  return <><PageIntro eyebrow="OVERHEADS · CASH CONTROL" title={t.expenses} description={`${data.expenses.length} ${t.expenseLedger.toLowerCase()}`} action={<button className="btn-primary" onClick={() => openModal('expense')}><Plus size={16} />{t.addExpense}</button>} />
+    <div className="grid gap-5 xl:grid-cols-[1.4fr_.6fr]"><section className="card overflow-hidden"><div className="grid gap-2 border-b border-black/[0.06] p-4 sm:grid-cols-2 lg:grid-cols-4"><select className="input" value={category} onChange={e=>setCategory(e.target.value)}><option value="all">{t.allCategories}</option>{categories.map(c=><option key={c} value={c}>{language==='te'?categoryTe[c]:c}</option>)}</select><select className="input" value={status} onChange={e=>setStatus(e.target.value)}><option value="all">{t.allStatuses}</option><option value="Settled">{t.settled}</option><option value="Pending">{t.pending}</option></select><input type="date" className="input" value={from} onChange={e=>setFrom(e.target.value)} aria-label={t.from}/><input type="date" className="input" value={to} onChange={e=>setTo(e.target.value)} aria-label={t.to}/></div><div className="table-scroll overflow-x-auto"><table className="w-full min-w-[760px]"><thead className="bg-[#f7f3eb] text-left text-[10px] font-bold uppercase tracking-wider text-slate-500"><tr>{[t.date,t.description,t.recipient,t.category,t.amount,t.status].map(h=><th key={h} className="px-4 py-3">{h}</th>)}</tr></thead><tbody className="divide-y divide-black/[0.05]">{filtered.map(e=><tr key={e.id}><td className="px-4 py-4 text-xs text-slate-500">{e.date}</td><td className="px-4 py-4 text-sm font-bold">{e.description}</td><td className="px-4 py-4 text-xs text-slate-600">{e.recipient}</td><td className="px-4 py-4 text-xs text-slate-500">{language==='te'?categoryTe[e.category]:e.category}</td><td className="num px-4 py-4 text-sm font-bold">{money(e.amount)}</td><td className="px-4 py-4"><StatusPill tone={e.status==='Settled'?'green':'amber'}>{e.status==='Settled'?t.settled:t.pending}</StatusPill></td></tr>)}</tbody><tfoot><tr className="bg-ink text-white"><td colSpan={4} className="px-4 py-3 text-xs font-bold uppercase tracking-wider">{t.totalThisMonth}</td><td className="num px-4 py-3 font-display text-lg font-extrabold">{money(total)}</td><td /></tr></tfoot></table></div></section>
+    <section className="card p-5"><div className="mb-5"><p className="text-[10px] font-bold uppercase tracking-[.15em] text-brass">{t.totalThisMonth}</p><p className="num mt-1 font-display text-3xl font-extrabold">{money(data.expenses.reduce((s,e)=>s+e.amount,0))}</p></div><h2 className="mb-4 text-sm font-bold">{t.categoryBreakdown}</h2><div className="space-y-4">{byCat.map(x=><div key={x.name}><div className="mb-1.5 flex justify-between gap-3 text-[11px]"><span className="truncate font-semibold text-slate-600">{language==='te'?categoryTe[x.name]:x.name}</span><span className="num font-bold">{money(x.value,true)}</span></div><div className="h-2 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-brass" style={{width:`${x.value/max*100}%`}} /></div></div>)}</div></section></div>
+  </>
+}
+
+function Advisor({ data, language }: { data: AppData; language: Language }) {
+  const t = useCopy(language); const stats = useStats(data); const [question,setQuestion]=useState(''); const [answer,setAnswer]=useState(''); const [loading,setLoading]=useState(false); const hasKey=!!import.meta.env.VITE_GEMINI_API_KEY
+  const modes = [{ id:'profit', label:t.profitability, icon:TrendingUp, color:'bg-emerald-50 text-emerald-700' },{ id:'cash',label:t.cashFlow,icon:WalletCards,color:'bg-sky-50 text-sky-700'},{id:'yield',label:t.yield,icon:Boxes,color:'bg-amber-50 text-amber-700'},{id:'cost',label:t.costReduction,icon:Zap,color:'bg-rose-50 text-rose-700'}]
+  const localAnalysis = (mode?: string) => {
+    const top = [...data.products].filter(p=>p.type==='FinishedGood').sort((a,b)=>((b.pricePerKg-b.costPerKg)/b.costPerKg)-((a.pricePerKg-a.costPerKg)/a.costPerKg))[0]; const rcn=data.products.find(p=>p.id==='p1')!; const pending=data.expenses.filter(e=>e.status==='Pending').reduce((s,e)=>s+e.amount,0)
+    if(language==='te') return mode==='yield' ? `ప్రస్తుతం ${number(rcn.stock)} కిలోల RCN నిల్వ ఉంది. 24% బెంచ్‌మార్క్ రికవరీ వద్ద సుమారు ${number(rcn.stock*.24)} కిలోల కెర్నల్స్ రావచ్చు. బ్యాచ్ వారీ తేమ, షెల్ బరువు మరియు గ్రేడ్ అవుట్‌పుట్ నమోదు చేస్తే వృథాను ఖచ్చితంగా గుర్తించవచ్చు.` : mode==='cash' ? `ప్రస్తుత నిల్వ అమ్మకపు సామర్థ్యం ${money(stats.sellValue)}. పెండింగ్ ఖర్చులు ${money(pending)}. W-320 మరియు W-240 అమ్మకాలను వేగవంతం చేసి వర్కింగ్ క్యాపిటల్‌ను విడుదల చేయండి.` : mode==='cost' ? `విద్యుత్ (${money(stats.power)}) మరియు కార్మిక ఖర్చులు (${money(stats.labour)}) ప్రధాన నియంత్రణ పాయింట్లు. పీక్ అవర్ మెషిన్ రన్స్‌ను షెడ్యూల్ చేయడం మరియు గ్రేడింగ్ బ్యాచ్‌లను కలపడం ద్వారా ఖర్చు తగ్గించవచ్చు.` : `${top.name} ప్రస్తుతం ${((top.pricePerKg-top.costPerKg)/top.costPerKg*100).toFixed(1)}% తో అత్యధిక మార్జిన్ ఇస్తోంది. మొత్తం నిల్వపై అంచనా స్థూల మార్జిన్ ${money(stats.sellValue-stats.costValue)}.`
+    return mode==='yield' ? `You hold ${number(rcn.stock)} kg of RCN. At a 24% benchmark recovery, that can yield about ${number(rcn.stock*.24)} kg of kernels. Record batch moisture, shell weight and grade output to isolate wastage precisely.` : mode==='cash' ? `Current stock has a selling potential of ${money(stats.sellValue)}, against ${money(pending)} in pending obligations. Prioritize W-320 and W-240 dispatches to release working capital without over-discounting.` : mode==='cost' ? `Power (${money(stats.power)}) and labour (${money(stats.labour)}) are the largest controllable costs. Consolidate grading batches and schedule machine runs outside peak tariff windows before cutting quality-linked labour.` : `${top.name} has the strongest current gross margin at ${((top.pricePerKg-top.costPerKg)/top.costPerKg*100).toFixed(1)}%. Estimated gross margin across stock is ${money(stats.sellValue-stats.costValue)} before operating expenses.`
+  }
+  const ask = async (mode?: string) => { setLoading(true); setAnswer(''); try { if(hasKey){ const { GoogleGenAI } = await import('@google/genai'); const ai=new GoogleGenAI({apiKey:import.meta.env.VITE_GEMINI_API_KEY!}); const snapshot={products:data.products,movements:data.movements.slice(0,20),expenses:data.expenses,staff:data.staff,summary:stats}; const prompt=`You are the bilingual CFO for Sri Mallikarjuna Industries, a cashew processing unit. Respond in ${language==='te'?'natural Telugu':'concise professional English'}. Use only the supplied business data, state assumptions, and give 3 prioritized actions. Audit mode: ${mode||'Custom Q&A'}. Question: ${question||'Provide an executive audit.'}. Data: ${JSON.stringify(snapshot)}`; const response=await ai.models.generateContent({model:'gemini-2.5-flash',contents:prompt}); setAnswer(response.text||localAnalysis(mode)); } else { await new Promise(r=>setTimeout(r,650)); setAnswer(localAnalysis(mode)); } } catch { setAnswer(localAnalysis(mode)); } finally { setLoading(false) } }
+  const pdf = async () => { const { jsPDF } = await import('jspdf'); const doc=new jsPDF(); doc.setFillColor(23,32,29); doc.rect(0,0,210,42,'F'); doc.setTextColor(255,255,255); doc.setFontSize(20); doc.text('Sri Mallikarjuna Industries',16,18); doc.setFontSize(10); doc.text('Executive Finance Report',16,28); doc.setTextColor(23,32,29); doc.setFontSize(9); doc.text(`Generated: ${new Date().toLocaleString('en-IN')}`,16,50); doc.setFontSize(12); doc.text('Operational Snapshot',16,64); doc.setFontSize(10); const lines=[`Total stock: ${number(stats.totalStock)} kg (${(stats.totalStock/1000).toFixed(2)} MT)`,`Inventory cost value: ${money(stats.costValue)}`,`Selling potential: ${money(stats.sellValue)}`,`Monthly expenses: ${money(stats.expenses)}`,`Pending obligations: ${money(stats.pending)}`,`Estimated operating profit: ${money(stats.operatingProfit)}`,`Average inventory margin: ${stats.margin.toFixed(1)}%`]; lines.forEach((x,i)=>doc.text(x,20,76+i*8)); doc.setFontSize(12); doc.text('CFO Commentary',16,145); doc.setFontSize(9); const text=answer||localAnalysis('profit'); doc.text(doc.splitTextToSize(text.replace(/[^\x00-\x7F]/g,' '),174),20,156); doc.save(`SMI-CFO-report-${today()}.pdf`) }
+  return <><PageIntro eyebrow="GEMINI · FINANCIAL COPILOT" title={t.financialIntelligence} description={t.cfoIntro} action={<button className="btn-secondary" onClick={pdf}><FileText size={16}/>{t.generateReport}</button>} />
+    <div className="grid gap-5 xl:grid-cols-[1.1fr_.9fr]"><section className="card overflow-hidden"><div className="grain relative bg-ink p-6 text-white"><div className="mb-6 flex items-start justify-between"><div><span className="mb-3 flex h-11 w-11 items-center justify-center rounded-2xl bg-[#d6a75f] text-ink"><Bot size={22}/></span><h2 className="font-display text-xl font-extrabold">{t.advisor}</h2><p className="mt-1 max-w-lg text-sm leading-relaxed text-white/55">{t.cfoIntro}</p></div><StatusPill tone={hasKey?'green':'amber'}>{hasKey?t.geminiMode:t.localMode}</StatusPill></div><div className="flex gap-2 rounded-2xl bg-white p-2"><input value={question} onChange={e=>setQuestion(e.target.value)} onKeyDown={e=>e.key==='Enter'&&ask()} className="min-w-0 flex-1 bg-transparent px-2 text-sm text-ink outline-none" placeholder={t.askAnything}/><button disabled={loading||!question.trim()} onClick={()=>ask()} className="btn-primary !rounded-xl !px-3"><Send size={16}/><span className="hidden sm:inline">{t.askCfo}</span></button></div><p className="mt-2 text-[10px] text-white/35">{t.questionExamples}</p></div><div className="min-h-[260px] p-6">{loading?<div className="flex h-48 flex-col items-center justify-center text-sm font-semibold text-slate-500"><Sparkles className="mb-3 animate-pulse text-brass"/>{t.analyzing}</div>:answer?<motion.div initial={{opacity:0,y:8}} animate={{opacity:1,y:0}}><div className="mb-3 flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-brass"><Sparkles size={14}/>{t.insight}</div><p className="whitespace-pre-wrap text-sm leading-7 text-slate-700">{answer}</p></motion.div>:<div className="flex h-48 items-center justify-center text-center text-sm text-slate-400"><div><CircleGauge className="mx-auto mb-3"/><p>{t.auditModes}</p></div></div>}</div></section>
+    <div className="space-y-5"><section className="card p-5"><h2 className="mb-4 font-display text-base font-bold">{t.auditModes}</h2><div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">{modes.map(({id,label,icon:Icon,color})=><button key={id} onClick={()=>ask(id)} className="group flex items-center gap-3 rounded-xl border border-slate-200 bg-white p-3.5 text-left transition hover:border-brass/50 hover:shadow-md"><span className={`flex h-10 w-10 items-center justify-center rounded-xl ${color}`}><Icon size={18}/></span><span className="text-sm font-bold">{label}</span><ChevronRight size={16} className="ml-auto text-slate-300 group-hover:text-brass"/></button>)}</div></section><section className="card p-5"><h2 className="mb-4 font-display text-base font-bold">{t.operationalSnapshot}</h2><div className="grid grid-cols-2 gap-3"><Snapshot label={t.paymentDue} value={money(stats.pending,true)}/><Snapshot label={t.averageMargin} value={`${stats.margin.toFixed(1)}%`}/><Snapshot label={t.projectedRevenue} value={money(stats.sellValue,true)}/><Snapshot label={t.stockCover} value={`34 ${t.days}`}/></div><div className="mt-4 flex gap-2 rounded-xl bg-parchment p-3 text-[11px] leading-relaxed text-slate-500"><Globe2 size={15} className="mt-0.5 shrink-0 text-pine"/>{hasKey?t.dataPrivate:t.configureKey}</div></section></div></div>
+  </>
+}
+
+function TransactionModal({ kind, data, language, close, commit, notify }: { kind: 'in'|'out'|null; data: AppData; language: Language; close:()=>void; commit:(d:AppData)=>void; notify:(s:string)=>void }) {
+  const t=useCopy(language); const [productId,setProductId]=useState(''); const [party,setParty]=useState(''); const [qty,setQty]=useState(''); const [rate,setRate]=useState(''); const [notes,setNotes]=useState(''); const [error,setError]=useState('')
+  useEffect(()=>{setProductId('');setParty('');setQty('');setRate('');setNotes('');setError('')},[kind])
+  const submit=()=>{const p=data.products.find(x=>x.id===productId); const q=Number(qty),r=Number(rate); if(!p||q<=0||r<=0)return; if(kind==='out'&&q>p.stock){setError(t.insufficient);return} const nextStock=p.stock+(kind==='in'?q:-q); const products=data.products.map(x=>x.id===p.id?{...x,stock:nextStock,costPerKg:kind==='in'?r:x.costPerKg,status:nextStock<=0?'Out of Stock' as const:nextStock<=x.reorderThreshold?'Low Stock' as const:'In Stock' as const}:x); const movement={id:uid('m'),productId:p.id,productName:p.name,type:(kind==='in'?'IN':'OUT') as 'IN'|'OUT',quantity:q,pricePerKg:r,date:today(),notes,party}; commit({...data,products,movements:[movement,...data.movements],activities:[{id:uid('a'),type:'stock',message:`${number(q)} kg ${p.name} ${kind==='in'?'received':'dispatched'}`,timestamp:new Date().toISOString()},...data.activities]});notify(t.movementRecorded);close()}
+  return <Modal open={!!kind} onClose={close} title={kind==='in'?t.modalReceive:t.modalDispatch}><div className="grid gap-4 sm:grid-cols-2"><Field label={t.selectProduct} wide><select className="input" value={productId} onChange={e=>{setProductId(e.target.value);const p=data.products.find(x=>x.id===e.target.value);if(p)setRate(String(kind==='in'?p.costPerKg:p.pricePerKg))}}><option value="">— {t.selectProduct} —</option>{data.products.map(p=><option key={p.id} value={p.id}>{p.name} · {number(p.stock)} kg</option>)}</select></Field><Field label={t.source} wide><select className="input" value={party} onChange={e=>setParty(e.target.value)}><option value="">— {t.selectParty} —</option>{data.parties.filter(p=>p.type===(kind==='in'?'Supplier':'Customer')).map(p=><option key={p.id}>{p.name}</option>)}<option>Internal production</option></select></Field><Field label={t.quantity}><input className="input" type="number" min="1" value={qty} onChange={e=>setQty(e.target.value)} placeholder="0" /></Field><Field label={t.unitRate}><input className="input" type="number" min="1" value={rate} onChange={e=>setRate(e.target.value)} placeholder="₹ 0" /></Field><Field label={t.notes} wide><textarea className="input min-h-24 resize-none" value={notes} onChange={e=>setNotes(e.target.value)} placeholder={`${t.notes} (${t.optional.toLowerCase()})`} /></Field></div>{error&&<p className="mt-3 rounded-xl bg-red-50 p-3 text-xs font-semibold text-red-700">{error}</p>}<div className="mt-5 flex justify-end gap-2"><button className="btn-secondary" onClick={close}>{t.cancel}</button><button className="btn-primary" disabled={!productId||!qty||!rate} onClick={submit}>{kind==='in'?<ArrowDownLeft size={16}/>:<ArrowUpRight size={16}/>} {kind==='in'?t.confirmReceive:t.confirmDispatch}</button></div></Modal>
+}
+
+function ExpenseModal({open,data,language,close,commit,notify}:{open:boolean;data:AppData;language:Language;close:()=>void;commit:(d:AppData)=>void;notify:(s:string)=>void}){
+  const t=useCopy(language);const [description,setDescription]=useState('');const[recipient,setRecipient]=useState('');const[amount,setAmount]=useState('');const[category,setCategory]=useState<Expense['category']>('Labour');const[status,setStatus]=useState<Expense['status']>('Pending');const[date,setDate]=useState(today())
+  const submit=()=>{if(!description||!recipient||Number(amount)<=0)return;const expense:Expense={id:uid('e'),description,recipient,amount:Number(amount),category,status,date};commit({...data,expenses:[expense,...data.expenses],activities:[{id:uid('a'),type:'expense',message:`${money(Number(amount))} ${description}`,timestamp:new Date().toISOString()},...data.activities]});notify(t.expenseRecorded);setDescription('');setRecipient('');setAmount('');close()}
+  return <Modal open={open} onClose={close} title={t.modalExpense}><div className="grid gap-4 sm:grid-cols-2"><Field label={t.description} wide><input className="input" value={description} onChange={e=>setDescription(e.target.value)}/></Field><Field label={t.paidTo} wide><input className="input" value={recipient} onChange={e=>setRecipient(e.target.value)}/></Field><Field label={t.amount}><input type="number" className="input" value={amount} onChange={e=>setAmount(e.target.value)} /></Field><Field label={t.date}><input type="date" className="input" value={date} onChange={e=>setDate(e.target.value)}/></Field><Field label={t.category}><select className="input" value={category} onChange={e=>setCategory(e.target.value as Expense['category'])}>{categories.map(c=><option key={c} value={c}>{language==='te'?categoryTe[c]:c}</option>)}</select></Field><Field label={t.settlement}><select className="input" value={status} onChange={e=>setStatus(e.target.value as Expense['status'])}><option value="Pending">{t.pending}</option><option value="Settled">{t.settled}</option></select></Field></div><div className="mt-5 flex justify-end gap-2"><button className="btn-secondary" onClick={close}>{t.cancel}</button><button className="btn-primary" disabled={!description||!recipient||!amount} onClick={submit}><Check size={16}/>{t.save}</button></div></Modal>
+}
+
+function PartyModal({open,data,language,close,commit,notify}:{open:boolean;data:AppData;language:Language;close:()=>void;commit:(d:AppData)=>void;notify:(s:string)=>void}){
+  const t=useCopy(language);const[name,setName]=useState('');const[type,setType]=useState<SupplierCustomer['type']>('Supplier');const[email,setEmail]=useState('');const[phone,setPhone]=useState('');const[address,setAddress]=useState('');const submit=()=>{if(!name||!phone)return;const party:SupplierCustomer={id:uid('c'),name,type,email,phone,address};commit({...data,parties:[party,...data.parties],activities:[{id:uid('a'),type:'party',message:`${name} added as ${type}`,timestamp:new Date().toISOString()},...data.activities]});notify(t.partySaved);setName('');setEmail('');setPhone('');setAddress('');close()}
+  return <Modal open={open} onClose={close} title={t.modalParty}><div className="grid gap-4 sm:grid-cols-2"><Field label={t.name} wide><input className="input" value={name} onChange={e=>setName(e.target.value)}/></Field><Field label={t.type}><select className="input" value={type} onChange={e=>setType(e.target.value as SupplierCustomer['type'])}><option value="Supplier">{t.supplier}</option><option value="Customer">{t.customer}</option></select></Field><Field label={t.phone}><input className="input" value={phone} onChange={e=>setPhone(e.target.value)}/></Field><Field label={t.email} wide><input type="email" className="input" value={email} onChange={e=>setEmail(e.target.value)}/></Field><Field label={t.address} wide><textarea className="input min-h-20 resize-none" value={address} onChange={e=>setAddress(e.target.value)}/></Field></div><div className="mt-5 flex justify-end gap-2"><button className="btn-secondary" onClick={close}>{t.cancel}</button><button className="btn-primary" disabled={!name||!phone} onClick={submit}><Check size={16}/>{t.save}</button></div></Modal>
+}
+
+function useStats(data: AppData){return useMemo(()=>{const totalStock=data.products.reduce((s,p)=>s+p.stock,0);const costValue=data.products.reduce((s,p)=>s+p.stock*p.costPerKg,0);const sellValue=data.products.reduce((s,p)=>s+p.stock*p.pricePerKg,0);const expenses=data.expenses.reduce((s,e)=>s+e.amount,0);const pending=data.expenses.filter(e=>e.status==='Pending').reduce((s,e)=>s+e.amount,0);const inbound=data.movements.filter(m=>m.type==='IN').reduce((s,m)=>s+m.quantity,0);const outbound=data.movements.filter(m=>m.type==='OUT').reduce((s,m)=>s+m.quantity,0);const revenue=data.movements.filter(m=>m.type==='OUT').reduce((s,m)=>s+m.quantity*m.pricePerKg,0);const cogs=data.movements.filter(m=>m.type==='OUT').reduce((s,m)=>s+m.quantity*(data.products.find(p=>p.id===m.productId)?.costPerKg||0),0);const by=(c:Expense['category'])=>data.expenses.filter(e=>e.category===c).reduce((s,e)=>s+e.amount,0);return{totalStock,costValue,sellValue,expenses,pending,inbound,outbound,operatingProfit:revenue-cogs-expenses,margin:costValue?((sellValue-costValue)/costValue*100):0,labour:by('Labour'),power:by('Electricity & Power'),freight:by('Freight & Transport')}} ,[data])}
+function Field({label,children,wide=false}:{label:string;children:React.ReactNode;wide?:boolean}){return <label className={wide?'sm:col-span-2':''}><span className="label">{label}</span>{children}</label>}
+function MiniMetric({label,value}:{label:string;value:string}){return <div><p className="truncate text-[10px] font-semibold text-slate-400">{label}</p><p className="num mt-1 text-xs font-extrabold">{value}</p></div>}
+function Snapshot({label,value}:{label:string;value:string}){return <div className="rounded-xl bg-parchment p-3"><p className="text-[10px] font-semibold leading-snug text-slate-500">{label}</p><p className="num mt-1 font-display text-lg font-extrabold">{value}</p></div>}
