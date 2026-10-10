@@ -1,8 +1,8 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import type { AppData, Attendance, Expense, Product, Staff, StockMovement, SupplierCustomer } from '../types'
-import { seedData } from '../data/seed'
+import { emptyData } from '../data/seed'
 
-const LOCAL_KEY = 'smi-erp-data-v2'
+const LOCAL_KEY = 'smi-erp-data-v3'
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL?.trim()
 const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY?.trim()
 
@@ -14,8 +14,8 @@ export interface DataProvider {
 export class LocalStorageProvider implements DataProvider {
   async load() {
     const saved = localStorage.getItem(LOCAL_KEY)
-    if (!saved) return structuredClone(seedData)
-    try { return JSON.parse(saved) as AppData } catch { return structuredClone(seedData) }
+    if (!saved) return structuredClone(emptyData)
+    try { return JSON.parse(saved) as AppData } catch { return structuredClone(emptyData) }
   }
 
   async save(data: AppData) {
